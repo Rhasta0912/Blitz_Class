@@ -4,6 +4,7 @@ import com.stellinova.blitz.bridge.BlitzAccessBridge;
 import com.stellinova.blitz.bridge.BlitzEvoBridge;
 import com.stellinova.blitz.core.BlitzConfig;
 import com.stellinova.blitz.player.PlayerData;
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Particle;
 import org.bukkit.Sound;
@@ -16,6 +17,8 @@ import org.bukkit.event.player.PlayerToggleSneakEvent;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.plugin.Plugin;
+import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
@@ -39,10 +42,15 @@ public class BlitzManager {
     // admin mode (ignores cooldowns / future costs)
     private final Set<UUID> adminPlayers = new HashSet<>();
 
+    // sneak-held players for Flash preview
+    private final Set<UUID> sneakingPlayers = new HashSet<>();
+    private BukkitTask previewTask;
+
     public BlitzManager(Plugin plugin, BlitzEvoBridge evo, BlitzConfig cfg) {
         this.plugin = plugin;
         this.evo = evo;
         this.cfg = cfg;
+        startPreviewLoop();
     }
 
     private PlayerData data(Player p) {
@@ -59,10 +67,16 @@ public class BlitzManager {
         lastSneak.remove(id);
         lastSwap.remove(id);
         adminPlayers.remove(id);
+        sneakingPlayers.remove(id);
     }
 
     public void shutdown() {
-        // nothing persistent yet
+        try {
+            if (previewTask != null) {
+                previewTask.cancel();
+                previewTask = null;
+            }
+        } catch (Throwable ignored) {}
     }
 
     // ===========================
@@ -180,6 +194,60 @@ public class BlitzManager {
     }
 
     // ===========================
+    //  FLASH PREVIEW LOOP
+    // ===========================
+
+    private void startPreviewLoop() {
+        try {
+            if (previewTask != null) {
+                previewTask.cancel();
+            }
+        } catch (Throwable ignored) {}
+
+        previewTask = new BukkitRunnable() {
+            @Override
+            public void run() {
+                if (sneakingPlayers.isEmpty()) return;
+
+                for (UUID id : new HashSet<>(sneakingPlayers)) {
+                    Player p = Bukkit.getPlayer(id);
+                    if (p == null || !p.isOnline() || !p.isSneaking()) {
+                        sneakingPlayers.remove(id);
+                        continue;
+                    }
+                    if (!BlitzAccessBridge.hasUsePerm(p) || !BlitzAccessBridge.hasBlitzRune(p)) continue;
+                    if (isStunned(p)) continue;
+                    if (onCd(p, "flash")) continue;
+
+                    // compute same target as Flash Step
+                    Location start = p.getLocation();
+                    Vector dir = start.getDirection().normalize();
+                    World w = p.getWorld();
+
+                    int stage = evo.stage(p);
+                    double maxDist = evo.scalar(p, "flash_distance", 1.0) * (6 + (stage) * 2);
+
+                    Location safe = start.clone();
+                    for (double d = 0.4; d <= maxDist; d += 0.4) {
+                        Location test = start.clone().add(dir.clone().multiply(d));
+                        if (!isSafe(test)) break;
+                        safe = test;
+                    }
+
+                    // preview particles at target
+                    w.spawnParticle(
+                            Particle.ELECTRIC_SPARK,
+                            safe.clone().add(0, 0.2, 0),
+                            10,
+                            0.25, 0.35, 0.25,
+                            0.01
+                    );
+                }
+            }
+        }.runTaskTimer(plugin, 5L, 5L); // ~0.25s
+    }
+
+    // ===========================
     //  INPUT TRIGGERS
     // ===========================
 
@@ -187,21 +255,32 @@ public class BlitzManager {
      * Sneak tap input:
      *  - Single tap  -> Bolt
      *  - Double tap  -> Flash Step
+     *  Holding sneak continuously shows Flash preview.
      */
     public void handleSneak(PlayerToggleSneakEvent e) {
         Player p = e.getPlayer();
         if (!BlitzAccessBridge.hasUsePerm(p) || !BlitzAccessBridge.hasBlitzRune(p)) return;
-        if (!e.isSneaking()) return; // only when pressing sneak
 
-        long now = System.currentTimeMillis();
         UUID id = p.getUniqueId();
-        long last = lastSneak.getOrDefault(id, 0L);
-        lastSneak.put(id, now);
 
-        if (now - last <= DOUBLE_TAP_MS) {
-            castFlash(p);
+        if (e.isSneaking()) {
+            // just pressed sneak: start tracking for preview
+            sneakingPlayers.add(id);
+
+            long now = System.currentTimeMillis();
+            long last = lastSneak.getOrDefault(id, 0L);
+            lastSneak.put(id, now);
+
+            if (now - last <= DOUBLE_TAP_MS) {
+                // double tap -> Flash
+                castFlash(p);
+            } else {
+                // single tap -> Bolt
+                castBolt(p);
+            }
         } else {
-            castBolt(p);
+            // stopped sneaking
+            sneakingPlayers.remove(id);
         }
     }
 
@@ -426,7 +505,10 @@ public class BlitzManager {
 
         for (Entity e : w.getNearbyEntities(center, radius, radius, radius)) {
             if (e instanceof LivingEntity && e != p) {
+                // stun them
                 applyStunEntity((LivingEntity) e, stunMs);
+                // lightning effect on each target
+                w.strikeLightningEffect(e.getLocation());
             }
         }
 
