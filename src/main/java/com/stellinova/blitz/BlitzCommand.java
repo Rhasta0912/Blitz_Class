@@ -29,7 +29,7 @@ public class BlitzCommand implements CommandExecutor {
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
 
         if (args.length == 0) {
-            sender.sendMessage("§bBlitz §7» §fUsage: /" + label + " <bolt|flash|shock|counter|ult|status|reload|admin>");
+            sender.sendMessage("§bBlitz §7» §fUsage: /" + label + " <bolt|flash|shock|counter|ult|status|reload|admin|reset>");
             return true;
         }
 
@@ -81,10 +81,39 @@ public class BlitzCommand implements CommandExecutor {
             boolean disable = args.length > 1 && args[1].equalsIgnoreCase("off");
             manager.setAdminMode(p, !disable);
             if (!disable) {
-                p.sendMessage("§aBlitz admin mode enabled. Cooldowns are ignored.");
+                p.sendMessage("§aBlitz admin mode enabled. Cooldowns and hunger costs are ignored.");
             } else {
                 p.sendMessage("§cBlitz admin mode disabled.");
             }
+            return true;
+        }
+
+        // RESET – reset rune state (cooldowns, stun/counter/ult timers)
+        if (sub.equals("reset")) {
+            if (!(sender instanceof Player self)) {
+                // /blitz reset <player> for admins
+                if (args.length < 2) {
+                    sender.sendMessage("Usage: /" + label + " reset <player>");
+                    return true;
+                }
+                if (!sender.hasPermission("blitz.admin")) {
+                    sender.sendMessage("§cYou are not an admin.");
+                    return true;
+                }
+                Player target = Bukkit.getPlayerExact(args[1]);
+                if (target == null) {
+                    sender.sendMessage("§cPlayer not found.");
+                    return true;
+                }
+                manager.warm(target);
+                sender.sendMessage("§aBlitz state reset for " + target.getName() + ".");
+                return true;
+            }
+
+            // self reset
+            Player p = self;
+            manager.warm(p);
+            p.sendMessage("§aYour Blitz rune state has been reset.");
             return true;
         }
 
@@ -125,7 +154,7 @@ public class BlitzCommand implements CommandExecutor {
                 manager.castUlt(p);
                 break;
             default:
-                p.sendMessage("§bBlitz §7» §fUsage: /" + label + " <bolt|flash|shock|counter|ult|status|reload|admin>");
+                p.sendMessage("§bBlitz §7» §fUsage: /" + label + " <bolt|flash|shock|counter|ult|status|reload|admin|reset>");
                 break;
         }
         return true;
