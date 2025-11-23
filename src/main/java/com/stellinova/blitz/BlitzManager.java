@@ -11,17 +11,33 @@ import org.bukkit.World;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.event.player.PlayerSwapHandItemsEvent;
+import org.bukkit.event.player.PlayerToggleSneakEvent;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.util.RayTraceResult;
 import org.bukkit.util.Vector;
 
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+
 public class BlitzManager {
 
     private final Plugin plugin;
     private final BlitzEvoBridge evo;
     private final BlitzConfig cfg;
+
+    // double-tap detection for inputs
+    private final Map<UUID, Long> lastSneak = new HashMap<>();
+    private final Map<UUID, Long> lastSwap = new HashMap<>();
+    private static final long DOUBLE_TAP_MS = 250L;
+
+    // admin mode (ignores cooldowns / future costs)
+    private final Set<UUID> adminPlayers = new HashSet<>();
 
     public BlitzManager(Plugin plugin, BlitzEvoBridge evo, BlitzConfig cfg) {
         this.plugin = plugin;
@@ -39,13 +55,37 @@ public class BlitzManager {
 
     public void handleQuit(Player p) {
         PlayerData.remove(p);
+        UUID id = p.getUniqueId();
+        lastSneak.remove(id);
+        lastSwap.remove(id);
+        adminPlayers.remove(id);
     }
 
     public void shutdown() {
         // nothing persistent yet
     }
 
-    // --- states via PlayerData ---
+    // ===========================
+    //  ADMIN MODE
+    // ===========================
+
+    public void setAdminMode(Player p, boolean enabled) {
+        if (p == null) return;
+        UUID id = p.getUniqueId();
+        if (enabled) {
+            adminPlayers.add(id);
+        } else {
+            adminPlayers.remove(id);
+        }
+    }
+
+    public boolean isAdminMode(Player p) {
+        return p != null && adminPlayers.contains(p.getUniqueId());
+    }
+
+    // ===========================
+    //  STATE
+    // ===========================
 
     public boolean isStunned(Player p) {
         return System.currentTimeMillis() < data(p).getStunnedUntil();
@@ -81,7 +121,7 @@ public class BlitzManager {
         attacker.damage(reflect, victim);
 
         victim.sendMessage("§bBlitz §7» §fYou reflected §c" +
-                String.format("%.1f", reflect) + "§f damage!");
+                String.format(java.util.Locale.US, "%.1f", reflect) + "§f damage!");
         if (attacker instanceof Player) {
             ((Player) attacker).sendMessage("§bBlitz §7» §fYour attack was §creflected§f!");
         }
@@ -89,9 +129,12 @@ public class BlitzManager {
         data(victim).setCounterUntil(0L);
     }
 
-    // --- cooldown helpers using PlayerData timestamps ---
+    // ===========================
+    //  COOLDOWNS
+    // ===========================
 
     public boolean onCd(Player p, String key) {
+        if (isAdminMode(p)) return false; // admin = no cooldown
         PlayerData pd = data(p);
         long now = System.currentTimeMillis();
         if ("bolt".equals(key)) return now < pd.getBoltReadyAt();
@@ -103,6 +146,7 @@ public class BlitzManager {
     }
 
     public long cdRemaining(Player p, String key) {
+        if (isAdminMode(p)) return 0L;
         PlayerData pd = data(p);
         long now = System.currentTimeMillis();
         long at = 0L;
@@ -115,12 +159,13 @@ public class BlitzManager {
     }
 
     public String cooldownText(Player p, String key) {
-        if (!onCd(p, key)) return "READY";
+        if (!onCd(p, key)) return "ready";
         long sec = cdRemaining(p, key) / 1000L;
         return sec + "s";
     }
 
     private void setCd(Player p, String key) {
+        if (isAdminMode(p)) return; // do not even set cooldowns in admin
         PlayerData pd = data(p);
         long t = System.currentTimeMillis() + cfg.cooldown(key);
         if ("bolt".equals(key)) pd.setBoltReadyAt(t);
@@ -134,7 +179,65 @@ public class BlitzManager {
         p.sendMessage("§bBlitz §7» §f" + t);
     }
 
-    // --- abilities inside manager ---
+    // ===========================
+    //  INPUT TRIGGERS
+    // ===========================
+
+    /**
+     * Sneak tap input:
+     *  - Single tap  -> Bolt
+     *  - Double tap  -> Flash Step
+     */
+    public void handleSneak(PlayerToggleSneakEvent e) {
+        Player p = e.getPlayer();
+        if (!BlitzAccessBridge.hasUsePerm(p) || !BlitzAccessBridge.hasBlitzRune(p)) return;
+        if (!e.isSneaking()) return; // only when pressing sneak
+
+        long now = System.currentTimeMillis();
+        UUID id = p.getUniqueId();
+        long last = lastSneak.getOrDefault(id, 0L);
+        lastSneak.put(id, now);
+
+        if (now - last <= DOUBLE_TAP_MS) {
+            castFlash(p);
+        } else {
+            castBolt(p);
+        }
+    }
+
+    /**
+     * Swap-hand (F) input:
+     *  - Double tap -> Ultimate
+     *  - Single tap -> Shock (standing) or Counter (while sneaking)
+     */
+    public void handleSwap(PlayerSwapHandItemsEvent e) {
+        Player p = e.getPlayer();
+        if (!BlitzAccessBridge.hasUsePerm(p) || !BlitzAccessBridge.hasBlitzRune(p)) return;
+
+        e.setCancelled(true); // do not actually swap items
+
+        long now = System.currentTimeMillis();
+        UUID id = p.getUniqueId();
+        long last = lastSwap.getOrDefault(id, 0L);
+        lastSwap.put(id, now);
+
+        boolean doubleTap = now - last <= DOUBLE_TAP_MS;
+
+        if (doubleTap) {
+            castUlt(p);
+            return;
+        }
+
+        if (p.isSneaking()) {
+            castCounter(p);
+        } else {
+            castShock(p);
+        }
+    }
+
+    // ===========================
+    //  ABILITIES
+    // ===========================
 
     public void castBolt(Player p) {
         if (!BlitzAccessBridge.hasUsePerm(p) || !BlitzAccessBridge.hasBlitzRune(p)) return;
@@ -333,6 +436,6 @@ public class BlitzManager {
         w.playSound(center, Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 1.0f, 1.0f);
 
         setCd(p, "ult");
-        msg(p, "§6Blitz Rush activated!");
+        msg(p, "§6Sparking Rush activated!");
     }
 }
