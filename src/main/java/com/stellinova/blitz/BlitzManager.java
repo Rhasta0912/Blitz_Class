@@ -39,11 +39,15 @@ public class BlitzManager {
     private final Map<UUID, Long> lastSwap = new HashMap<>();
     private static final long DOUBLE_TAP_MS = 250L;
 
-    // admin mode (ignores cooldowns / future costs)
+    // admin mode (ignores cooldowns / costs)
     private final Set<UUID> adminPlayers = new HashSet<>();
 
     // sneak-held players for Flash preview
     private final Set<UUID> sneakingPlayers = new HashSet<>();
+
+    // pending single-tap Bolt (so Flash double-tap doesn’t auto-fire Bolt first)
+    private final Set<UUID> pendingBolt = new HashSet<>();
+
     private BukkitTask previewTask;
 
     public BlitzManager(Plugin plugin, BlitzEvoBridge evo, BlitzConfig cfg) {
@@ -68,6 +72,7 @@ public class BlitzManager {
         lastSwap.remove(id);
         adminPlayers.remove(id);
         sneakingPlayers.remove(id);
+        pendingBolt.remove(id);
     }
 
     public void shutdown() {
@@ -194,6 +199,25 @@ public class BlitzManager {
     }
 
     // ===========================
+    //  HUNGER COSTS
+    // ===========================
+
+    /**
+     * Basic hunger gate: returns false if not enough food.
+     * Admin mode: no cost, always true.
+     */
+    private boolean requireHunger(Player p, int cost) {
+        if (isAdminMode(p)) return true;
+        int food = p.getFoodLevel();
+        if (food < cost) {
+            msg(p, "You are too exhausted to use this.");
+            return false;
+        }
+        p.setFoodLevel(Math.max(0, food - cost));
+        return true;
+    }
+
+    // ===========================
     //  FLASH PREVIEW LOOP
     // ===========================
 
@@ -253,9 +277,11 @@ public class BlitzManager {
 
     /**
      * Sneak tap input:
-     *  - Single tap  -> Bolt
+     *  - Single tap  -> Bolt  (delayed by DOUBLE_TAP_MS)
      *  - Double tap  -> Flash Step
-     *  Holding sneak continuously shows Flash preview.
+     *
+     * Holding sneak keeps Flash preview active.
+     * Double-tap no longer forces Bolt first.
      */
     public void handleSneak(PlayerToggleSneakEvent e) {
         Player p = e.getPlayer();
@@ -264,7 +290,7 @@ public class BlitzManager {
         UUID id = p.getUniqueId();
 
         if (e.isSneaking()) {
-            // just pressed sneak: start tracking for preview
+            // pressed sneak: track for preview
             sneakingPlayers.add(id);
 
             long now = System.currentTimeMillis();
@@ -272,14 +298,24 @@ public class BlitzManager {
             lastSneak.put(id, now);
 
             if (now - last <= DOUBLE_TAP_MS) {
-                // double tap -> Flash
+                // double tap -> Flash, cancel pending Bolt
+                pendingBolt.remove(id);
                 castFlash(p);
             } else {
-                // single tap -> Bolt
-                castBolt(p);
+                // schedule possible single-tap Bolt
+                pendingBolt.add(id);
+                long scheduleTicks = Math.max(1L, DOUBLE_TAP_MS / 50L);
+                Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                    // if still pending and no double-tap happened
+                    if (!pendingBolt.remove(id)) return;
+                    if (!p.isOnline()) return;
+                    // Only cast Bolt if they still have Blitz + perms
+                    if (!BlitzAccessBridge.hasUsePerm(p) || !BlitzAccessBridge.hasBlitzRune(p)) return;
+                    castBolt(p);
+                }, scheduleTicks);
             }
         } else {
-            // stopped sneaking
+            // released sneak: stop preview
             sneakingPlayers.remove(id);
         }
     }
@@ -332,6 +368,10 @@ public class BlitzManager {
             return;
         }
 
+        if (!requireHunger(p, 2)) { // HUNGER COST
+            return;
+        }
+
         int stage = evo.stage(p);
         double dmg = evo.scalar(p, "bolt_damage", 1.0) * (5 + stage * 2);
 
@@ -377,6 +417,10 @@ public class BlitzManager {
             return;
         }
 
+        if (!requireHunger(p, 3)) { // higher cost for mobility
+            return;
+        }
+
         int stage = evo.stage(p);
         double maxDist = evo.scalar(p, "flash_distance", 1.0) * (6 + (stage) * 2);
 
@@ -412,6 +456,10 @@ public class BlitzManager {
         if (onCd(p, "shock")) {
             long sec = cdRemaining(p, "shock") / 1000L;
             msg(p, "Shock on cooldown (" + sec + "s)");
+            return;
+        }
+
+        if (!requireHunger(p, 2)) { // moderate cost
             return;
         }
 
@@ -460,6 +508,10 @@ public class BlitzManager {
             return;
         }
 
+        if (!requireHunger(p, 2)) {
+            return;
+        }
+
         long durationMs = 1000L;
 
         p.addPotionEffect(new PotionEffect(
@@ -489,6 +541,10 @@ public class BlitzManager {
 
         if (isStunned(p)) {
             msg(p, "You are stunned.");
+            return;
+        }
+
+        if (!requireHunger(p, 4)) { // big cost ult
             return;
         }
 
