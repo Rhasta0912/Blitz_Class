@@ -1,6 +1,7 @@
 package com.stellinova.blitz.listener;
 
 import com.stellinova.blitz.manager.BlitzManager;
+import org.bukkit.Location;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
@@ -26,6 +27,7 @@ public class BlitzListener implements Listener {
         Entity victim = e.getEntity();
         Entity attacker = e.getDamager();
 
+        // Prevent stunned players attacking
         if (attacker instanceof Player) {
             Player p = (Player) attacker;
             if (manager.isStunned(p)) {
@@ -35,8 +37,13 @@ public class BlitzListener implements Listener {
             }
         }
 
+        // Handle Counter reflect
         if (victim instanceof Player && attacker instanceof LivingEntity) {
-            manager.triggerCounterHit((Player) victim, (LivingEntity) attacker, e.getFinalDamage());
+            Player victimPlayer = (Player) victim;
+            LivingEntity attackEntity = (LivingEntity) attacker;
+
+            boolean reflected = manager.handleCounterHit(victimPlayer, attackEntity, e);
+            if (reflected) return;
         }
     }
 
@@ -45,8 +52,20 @@ public class BlitzListener implements Listener {
         Player p = e.getPlayer();
         if (!manager.isStunned(p)) return;
 
-        if (!e.getFrom().toVector().equals(e.getTo().toVector())) {
-            e.setTo(e.getFrom());
+        Location from = e.getFrom();
+        Location to = e.getTo();
+        if (to == null) return;
+
+        // Allow falling but block moving up or horizontally
+        boolean goingDown = to.getY() < from.getY();
+
+        if (goingDown) {
+            Location fixed = to.clone();
+            fixed.setX(from.getX());
+            fixed.setZ(from.getZ());
+            e.setTo(fixed);
+        } else {
+            e.setTo(from);
         }
     }
 
@@ -55,13 +74,11 @@ public class BlitzListener implements Listener {
         manager.handleQuit(e.getPlayer());
     }
 
-    // Sneak tap -> Bolt / Flash
     @EventHandler(ignoreCancelled = true)
     public void onSneak(PlayerToggleSneakEvent e) {
         manager.handleSneak(e);
     }
 
-    // Swap-hand (F) -> Shock / Counter / Ult
     @EventHandler(ignoreCancelled = true)
     public void onSwap(PlayerSwapHandItemsEvent e) {
         manager.handleSwap(e);
