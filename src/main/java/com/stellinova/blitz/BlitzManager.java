@@ -12,6 +12,7 @@ import org.bukkit.World;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.player.PlayerSwapHandItemsEvent;
 import org.bukkit.event.player.PlayerToggleSneakEvent;
 import org.bukkit.potion.PotionEffect;
@@ -127,25 +128,50 @@ public class BlitzManager {
             p.addPotionEffect(new PotionEffect(PotionEffectType.SLOW, ticks, 6, false, false, true));
             p.addPotionEffect(new PotionEffect(PotionEffectType.JUMP, ticks, 128, false, false, true));
             p.sendMessage("§bBlitz §7» §cYou are stunned!");
+
+            // If they are in the air, drop them to the nearest ground block
+            Location loc = p.getLocation();
+            World w = loc.getWorld();
+            if (w != null && !p.isOnGround()) {
+                Location check = loc.clone();
+                for (int i = 0; i < 24; i++) { // search up to 24 blocks down
+                    check.subtract(0, 1, 0);
+                    if (check.getBlock().getType().isSolid()) {
+                        Location ground = check.clone().add(0, 1, 0);
+                        ground.setYaw(loc.getYaw());
+                        ground.setPitch(loc.getPitch());
+                        p.teleport(ground);
+                        break;
+                    }
+                }
+            }
         } else {
             int ticks = (int) (durationMs / 50L);
             ent.addPotionEffect(new PotionEffect(PotionEffectType.SLOW, ticks, 5, false, false, true));
         }
     }
 
-    public void triggerCounterHit(Player victim, LivingEntity attacker, double dmg) {
-        if (!isCounterActive(victim)) return;
+    /**
+     * Counter logic:
+     * - If window active, victim takes 0.
+     * - All incoming damage is reflected to attacker.
+     */
+    public boolean handleCounterHit(Player victim, LivingEntity attacker, EntityDamageByEntityEvent e) {
+        if (!isCounterActive(victim)) return false;
 
-        double reflect = dmg * 2.0;
-        attacker.damage(reflect, victim);
+        double dmg = e.getFinalDamage();
+        e.setCancelled(true); // victim takes no damage
+
+        attacker.damage(dmg, victim);
 
         victim.sendMessage("§bBlitz §7» §fYou reflected §c" +
-                String.format(java.util.Locale.US, "%.1f", reflect) + "§f damage!");
+                String.format(java.util.Locale.US, "%.1f", dmg) + "§f damage!");
         if (attacker instanceof Player) {
             ((Player) attacker).sendMessage("§bBlitz §7» §fYour attack was §creflected§f!");
         }
 
-        data(victim).setCounterUntil(0L);
+        data(victim).setCounterUntil(0L); // one-shot window per activation
+        return true;
     }
 
     // ===========================
@@ -508,16 +534,19 @@ public class BlitzManager {
             return;
         }
 
-        if (!requireHunger(p, 2)) {
+        // VERY hunger costly for counter
+        if (!requireHunger(p, 4)) {
             return;
         }
 
-        long durationMs = 1000L;
+        // 2.5s invincibility / reflect window
+        long durationMs = 2500L;
 
+        int ticks = (int) (durationMs / 50L);
         p.addPotionEffect(new PotionEffect(
-                PotionEffectType.ABSORPTION, 20, 1, false, false, true));
+                PotionEffectType.ABSORPTION, ticks, 1, false, false, true));
         p.addPotionEffect(new PotionEffect(
-                PotionEffectType.DAMAGE_RESISTANCE, 20, 2, false, false, true));
+                PotionEffectType.DAMAGE_RESISTANCE, ticks, 2, false, false, true));
 
         data(p).setCounterUntil(System.currentTimeMillis() + durationMs);
 
@@ -527,7 +556,7 @@ public class BlitzManager {
         w.playSound(loc, Sound.ITEM_TRIDENT_RETURN, 1.0f, 1.3f);
 
         setCd(p, "counter");
-        msg(p, "Counter ready for 1 second.");
+        msg(p, "Counter ready for 2.5 seconds.");
     }
 
     public void castUlt(Player p) {
