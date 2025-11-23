@@ -1,0 +1,11 @@
+cooldowns:
+  bolt: 6000
+  flash: 5000
+  shock: 8000
+  counter: 10000
+  ult: 45000
+
+scalars:
+  bolt_damage: 1.0
+  shock_duration: 1.0
+  flash_distance: 1.0

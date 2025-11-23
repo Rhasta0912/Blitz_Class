@@ -1,0 +1,23 @@
+name: Blitz
+main: com.stellinova.blitz.core.BlitzPlugin
+version: 1.0.0
+api-version: '1.20'
+author: Stellinova
+description: Blitz rune class - lightning mobility, stun, and counter abilities.
+
+commands:
+  blitz:
+    description: Blitz root command
+    usage: /blitz <bolt|flash|shock|counter|ult|status|reload>
+    permission: blitz.use
+
+permissions:
+  blitz.use:
+    default: true
+  blitz.admin:
+    default: op
+
+softdepend:
+  - RuneSelector
+  - PlaceholderAPI
+  - EvoCore

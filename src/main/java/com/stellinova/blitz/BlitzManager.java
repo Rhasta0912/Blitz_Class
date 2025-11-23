@@ -1,0 +1,338 @@
+package com.stellinova.blitz.manager;
+
+import com.stellinova.blitz.bridge.BlitzAccessBridge;
+import com.stellinova.blitz.bridge.BlitzEvoBridge;
+import com.stellinova.blitz.core.BlitzConfig;
+import com.stellinova.blitz.player.PlayerData;
+import org.bukkit.Location;
+import org.bukkit.Particle;
+import org.bukkit.Sound;
+import org.bukkit.World;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.Player;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
+import org.bukkit.plugin.Plugin;
+import org.bukkit.util.RayTraceResult;
+import org.bukkit.util.Vector;
+
+public class BlitzManager {
+
+    private final Plugin plugin;
+    private final BlitzEvoBridge evo;
+    private final BlitzConfig cfg;
+
+    public BlitzManager(Plugin plugin, BlitzEvoBridge evo, BlitzConfig cfg) {
+        this.plugin = plugin;
+        this.evo = evo;
+        this.cfg = cfg;
+    }
+
+    private PlayerData data(Player p) {
+        return PlayerData.get(p);
+    }
+
+    public void warm(Player p) {
+        data(p).reset();
+    }
+
+    public void handleQuit(Player p) {
+        PlayerData.remove(p);
+    }
+
+    public void shutdown() {
+        // nothing persistent yet
+    }
+
+    // --- states via PlayerData ---
+
+    public boolean isStunned(Player p) {
+        return System.currentTimeMillis() < data(p).getStunnedUntil();
+    }
+
+    public boolean isCounterActive(Player p) {
+        return System.currentTimeMillis() < data(p).getCounterUntil();
+    }
+
+    public boolean isUltActive(Player p) {
+        return System.currentTimeMillis() < data(p).getBlitzRushUntil();
+    }
+
+    private void applyStunEntity(LivingEntity ent, long durationMs) {
+        if (ent instanceof Player) {
+            Player p = (Player) ent;
+            PlayerData pd = data(p);
+            pd.setStunnedUntil(System.currentTimeMillis() + durationMs);
+            int ticks = (int) (durationMs / 50L);
+            p.addPotionEffect(new PotionEffect(PotionEffectType.SLOW, ticks, 6, false, false, true));
+            p.addPotionEffect(new PotionEffect(PotionEffectType.JUMP, ticks, 128, false, false, true));
+            p.sendMessage("§bBlitz §7» §cYou are stunned!");
+        } else {
+            int ticks = (int) (durationMs / 50L);
+            ent.addPotionEffect(new PotionEffect(PotionEffectType.SLOW, ticks, 5, false, false, true));
+        }
+    }
+
+    public void triggerCounterHit(Player victim, LivingEntity attacker, double dmg) {
+        if (!isCounterActive(victim)) return;
+
+        double reflect = dmg * 2.0;
+        attacker.damage(reflect, victim);
+
+        victim.sendMessage("§bBlitz §7» §fYou reflected §c" +
+                String.format("%.1f", reflect) + "§f damage!");
+        if (attacker instanceof Player) {
+            ((Player) attacker).sendMessage("§bBlitz §7» §fYour attack was §creflected§f!");
+        }
+
+        data(victim).setCounterUntil(0L);
+    }
+
+    // --- cooldown helpers using PlayerData timestamps ---
+
+    public boolean onCd(Player p, String key) {
+        PlayerData pd = data(p);
+        long now = System.currentTimeMillis();
+        if ("bolt".equals(key)) return now < pd.getBoltReadyAt();
+        if ("flash".equals(key)) return now < pd.getFlashReadyAt();
+        if ("shock".equals(key)) return now < pd.getShockReadyAt();
+        if ("counter".equals(key)) return now < pd.getCounterReadyAt();
+        if ("ult".equals(key)) return now < pd.getUltReadyAt();
+        return false;
+    }
+
+    public long cdRemaining(Player p, String key) {
+        PlayerData pd = data(p);
+        long now = System.currentTimeMillis();
+        long at = 0L;
+        if ("bolt".equals(key)) at = pd.getBoltReadyAt();
+        else if ("flash".equals(key)) at = pd.getFlashReadyAt();
+        else if ("shock".equals(key)) at = pd.getShockReadyAt();
+        else if ("counter".equals(key)) at = pd.getCounterReadyAt();
+        else if ("ult".equals(key)) at = pd.getUltReadyAt();
+        return Math.max(0L, at - now);
+    }
+
+    public String cooldownText(Player p, String key) {
+        if (!onCd(p, key)) return "READY";
+        long sec = cdRemaining(p, key) / 1000L;
+        return sec + "s";
+    }
+
+    private void setCd(Player p, String key) {
+        PlayerData pd = data(p);
+        long t = System.currentTimeMillis() + cfg.cooldown(key);
+        if ("bolt".equals(key)) pd.setBoltReadyAt(t);
+        else if ("flash".equals(key)) pd.setFlashReadyAt(t);
+        else if ("shock".equals(key)) pd.setShockReadyAt(t);
+        else if ("counter".equals(key)) pd.setCounterReadyAt(t);
+        else if ("ult".equals(key)) pd.setUltReadyAt(t);
+    }
+
+    private void msg(Player p, String t) {
+        p.sendMessage("§bBlitz §7» §f" + t);
+    }
+
+    // --- abilities inside manager ---
+
+    public void castBolt(Player p) {
+        if (!BlitzAccessBridge.hasUsePerm(p) || !BlitzAccessBridge.hasBlitzRune(p)) return;
+
+        if (onCd(p, "bolt")) {
+            long sec = cdRemaining(p, "bolt") / 1000L;
+            msg(p, "Bolt on cooldown (" + sec + "s)");
+            return;
+        }
+
+        if (isStunned(p)) {
+            msg(p, "You are stunned.");
+            return;
+        }
+
+        int stage = evo.stage(p);
+        double dmg = evo.scalar(p, "bolt_damage", 1.0) * (5 + stage * 2);
+
+        Location eye = p.getEyeLocation();
+        Vector dir = eye.getDirection().normalize();
+        World w = p.getWorld();
+
+        RayTraceResult result = w.rayTraceEntities(
+                eye, dir, 30, 1.4,
+                e -> e instanceof LivingEntity && e != p);
+
+        Location target =
+                (result != null && result.getHitEntity() != null)
+                        ? result.getHitEntity().getLocation()
+                        : eye.clone().add(dir.multiply(8));
+
+        w.strikeLightningEffect(target);
+
+        for (Entity e : w.getNearbyEntities(target, 2.6, 2.6, 2.6)) {
+            if (e instanceof LivingEntity && e != p) {
+                ((LivingEntity) e).damage(dmg, p);
+            }
+        }
+
+        w.spawnParticle(Particle.ELECTRIC_SPARK, target, 40, .6, .8, .6, .08);
+        w.playSound(target, Sound.ENTITY_LIGHTNING_BOLT_IMPACT, 1.0f, 1.2f);
+
+        setCd(p, "bolt");
+        msg(p, "Bolt cast!");
+    }
+
+    public void castFlash(Player p) {
+        if (!BlitzAccessBridge.hasUsePerm(p) || !BlitzAccessBridge.hasBlitzRune(p)) return;
+
+        if (onCd(p, "flash")) {
+            long sec = cdRemaining(p, "flash") / 1000L;
+            msg(p, "Flash Step on cooldown (" + sec + "s)");
+            return;
+        }
+
+        if (isStunned(p)) {
+            msg(p, "You are stunned.");
+            return;
+        }
+
+        int stage = evo.stage(p);
+        double maxDist = evo.scalar(p, "flash_distance", 1.0) * (6 + (stage) * 2);
+
+        Location start = p.getLocation();
+        Vector dir = start.getDirection().normalize();
+        World w = p.getWorld();
+        Location safe = start.clone();
+
+        for (double d = 0.4; d <= maxDist; d += 0.4) {
+            Location test = start.clone().add(dir.clone().multiply(d));
+            if (!isSafe(test)) break;
+            safe = test;
+        }
+
+        w.spawnParticle(Particle.ELECTRIC_SPARK, start, 20, .5, 1.0, .5, 0.1);
+        p.teleport(safe);
+        w.spawnParticle(Particle.ELECTRIC_SPARK, safe, 20, .5, 1.0, .5, 0.1);
+        w.playSound(safe, Sound.ENTITY_ENDERMAN_TELEPORT, 1.0f, 1.6f);
+
+        setCd(p, "flash");
+        msg(p, "Flash Step!");
+    }
+
+    private boolean isSafe(Location loc) {
+        Location feet = loc.clone();
+        Location head = loc.clone().add(0, 1, 0);
+        return feet.getBlock().isPassable() && head.getBlock().isPassable();
+    }
+
+    public void castShock(Player p) {
+        if (!BlitzAccessBridge.hasUsePerm(p) || !BlitzAccessBridge.hasBlitzRune(p)) return;
+
+        if (onCd(p, "shock")) {
+            long sec = cdRemaining(p, "shock") / 1000L;
+            msg(p, "Shock on cooldown (" + sec + "s)");
+            return;
+        }
+
+        World w = p.getWorld();
+        Location eye = p.getEyeLocation();
+        Vector dir = eye.getDirection().normalize();
+
+        RayTraceResult result = w.rayTraceEntities(
+                eye, dir, 20, 1.4,
+                e -> e instanceof LivingEntity && e != p);
+
+        if (result == null || result.getHitEntity() == null) {
+            msg(p, "No target for Shock.");
+            return;
+        }
+
+        Location hitLoc = result.getHitEntity().getLocation();
+        int stage = evo.stage(p);
+        long durationMs = (long) (1000L * (1 + stage) * evo.scalar(p, "shock_duration", 1.0));
+        double radius = 3.0;
+
+        for (Entity e : w.getNearbyEntities(hitLoc, radius, radius, radius)) {
+            if (e instanceof LivingEntity && e != p) {
+                applyStunEntity((LivingEntity) e, durationMs);
+            }
+        }
+
+        w.spawnParticle(Particle.ELECTRIC_SPARK, hitLoc, 60, 0.8, 1.0, 0.8, 0.12);
+        w.playSound(hitLoc, Sound.BLOCK_AMETHYST_BLOCK_HIT, 1.0f, 1.4f);
+
+        setCd(p, "shock");
+        msg(p, "Shock cast.");
+    }
+
+    public void castCounter(Player p) {
+        if (!BlitzAccessBridge.hasUsePerm(p) || !BlitzAccessBridge.hasBlitzRune(p)) return;
+
+        if (onCd(p, "counter")) {
+            long sec = cdRemaining(p, "counter") / 1000L;
+            msg(p, "Counter on cooldown (" + sec + "s)");
+            return;
+        }
+
+        if (isStunned(p)) {
+            msg(p, "You are stunned.");
+            return;
+        }
+
+        long durationMs = 1000L;
+
+        p.addPotionEffect(new PotionEffect(
+                PotionEffectType.ABSORPTION, 20, 1, false, false, true));
+        p.addPotionEffect(new PotionEffect(
+                PotionEffectType.DAMAGE_RESISTANCE, 20, 2, false, false, true));
+
+        data(p).setCounterUntil(System.currentTimeMillis() + durationMs);
+
+        Location loc = p.getLocation().add(0, 1, 0);
+        World w = p.getWorld();
+        w.spawnParticle(Particle.ELECTRIC_SPARK, loc, 40, 0.5, 0.8, 0.5, 0.1);
+        w.playSound(loc, Sound.ITEM_TRIDENT_RETURN, 1.0f, 1.3f);
+
+        setCd(p, "counter");
+        msg(p, "Counter ready for 1 second.");
+    }
+
+    public void castUlt(Player p) {
+        if (!BlitzAccessBridge.hasUsePerm(p) || !BlitzAccessBridge.hasBlitzRune(p)) return;
+
+        if (onCd(p, "ult")) {
+            long sec = cdRemaining(p, "ult") / 1000L;
+            msg(p, "Blitz Rush on cooldown (" + sec + "s)");
+            return;
+        }
+
+        if (isStunned(p)) {
+            msg(p, "You are stunned.");
+            return;
+        }
+
+        int durationTicks = 200;
+        p.addPotionEffect(new PotionEffect(
+                PotionEffectType.SPEED, durationTicks, 1, false, false, true));
+        p.addPotionEffect(new PotionEffect(
+                PotionEffectType.INCREASE_DAMAGE, durationTicks, 1, false, false, true));
+
+        long stunMs = 2000L;
+        double radius = 10.0;
+        Location center = p.getLocation();
+        World w = p.getWorld();
+
+        for (Entity e : w.getNearbyEntities(center, radius, radius, radius)) {
+            if (e instanceof LivingEntity && e != p) {
+                applyStunEntity((LivingEntity) e, stunMs);
+            }
+        }
+
+        data(p).setBlitzRushUntil(System.currentTimeMillis() + durationTicks * 50L);
+
+        w.spawnParticle(Particle.ELECTRIC_SPARK, center, 90, 1.5, 1.0, 1.5, 0.16);
+        w.playSound(center, Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 1.0f, 1.0f);
+
+        setCd(p, "ult");
+        msg(p, "§6Blitz Rush activated!");
+    }
+}
