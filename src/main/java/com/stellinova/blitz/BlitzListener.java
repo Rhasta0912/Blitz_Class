@@ -10,6 +10,8 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.player.PlayerSwapHandItemsEvent;
+import org.bukkit.event.player.PlayerToggleSneakEvent;
 
 public class BlitzListener implements Listener {
 
@@ -51,5 +53,17 @@ public class BlitzListener implements Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent e) {
         manager.handleQuit(e.getPlayer());
+    }
+
+    // Sneak tap -> Bolt / Flash
+    @EventHandler(ignoreCancelled = true)
+    public void onSneak(PlayerToggleSneakEvent e) {
+        manager.handleSneak(e);
+    }
+
+    // Swap-hand (F) -> Shock / Counter / Ult
+    @EventHandler(ignoreCancelled = true)
+    public void onSwap(PlayerSwapHandItemsEvent e) {
+        manager.handleSwap(e);
     }
 }
