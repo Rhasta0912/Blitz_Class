@@ -78,9 +78,24 @@ public class BlitzCommand implements CommandExecutor {
                 p.sendMessage("§cYou are not an admin.");
                 return true;
             }
-            boolean disable = args.length > 1 && args[1].equalsIgnoreCase("off");
-            manager.setAdminMode(p, !disable);
-            if (!disable) {
+            boolean enable = true; // Default to toggle ON if no arg, or check arg
+            if (args.length > 1) {
+                String arg = args[1].toLowerCase();
+                if (arg.equals("off")) enable = false;
+                else if (arg.equals("on")) enable = true;
+                else {
+                    p.sendMessage("§cUsage: /blitz admin <on|off>");
+                    return true;
+                }
+            } else {
+                // Toggle behavior if no arg provided? Or force usage?
+                // Let's default to ON for convenience, or check current state?
+                // Current state check isn't exposed easily here without getter.
+                // Let's assume /blitz admin -> ON for now as per previous behavior.
+            }
+
+            manager.setAdminMode(p, enable);
+            if (enable) {
                 p.sendMessage("§aBlitz admin mode enabled. Cooldowns and hunger costs are ignored.");
             } else {
                 p.sendMessage("§cBlitz admin mode disabled.");
