@@ -550,7 +550,7 @@ public class BlitzManager {
                 }
 
                 if (current.getBlock().getType().isSolid()) {
-                    current.getWorld().spawnParticle(Particle.SMOKE, current, 5, 0.1, 0.1, 0.1, 0.01);
+                    current.getWorld().spawnParticle(Particle.SMOKE_NORMAL, current, 5, 0.1, 0.1, 0.1, 0.01);
                     cancel();
                 }
             }
