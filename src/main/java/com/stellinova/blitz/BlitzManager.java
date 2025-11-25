@@ -49,6 +49,11 @@ public class BlitzManager {
     // pending single-tap Bolt (so Flash double-tap doesn’t auto-fire Bolt first)
     private final Set<UUID> pendingBolt = new HashSet<>();
 
+    // Shock charge state
+    private final Set<UUID> shockCharging = new HashSet<>();
+    private final Map<UUID, Long> shockChargeStart = new HashMap<>();
+    private static final long SHOCK_CHARGE_MS = 1500L;
+
     private BukkitTask previewTask;
 
     public BlitzManager(Plugin plugin, BlitzEvoBridge evo, BlitzConfig cfg) {
@@ -74,6 +79,8 @@ public class BlitzManager {
         adminPlayers.remove(id);
         sneakingPlayers.remove(id);
         pendingBolt.remove(id);
+        shockCharging.remove(id);
+        shockChargeStart.remove(id);
     }
 
     public void shutdown() {
@@ -129,22 +136,7 @@ public class BlitzManager {
             p.addPotionEffect(new PotionEffect(PotionEffectType.JUMP, ticks, 128, false, false, true));
             p.sendMessage("§bBlitz §7» §cYou are stunned!");
 
-            // If they are in the air, drop them to the nearest ground block
-            Location loc = p.getLocation();
-            World w = loc.getWorld();
-            if (w != null && !p.isOnGround()) {
-                Location check = loc.clone();
-                for (int i = 0; i < 24; i++) { // search up to 24 blocks down
-                    check.subtract(0, 1, 0);
-                    if (check.getBlock().getType().isSolid()) {
-                        Location ground = check.clone().add(0, 1, 0);
-                        ground.setYaw(loc.getYaw());
-                        ground.setPitch(loc.getPitch());
-                        p.teleport(ground);
-                        break;
-                    }
-                }
-            }
+            // Removed forced teleport to ground to prevent anti-cheat kicks while stunned in air
         } else {
             int ticks = (int) (durationMs / 50L);
             ent.addPotionEffect(new PotionEffect(PotionEffectType.SLOW, ticks, 5, false, false, true));
@@ -159,7 +151,7 @@ public class BlitzManager {
     public boolean handleCounterHit(Player victim, LivingEntity attacker, EntityDamageByEntityEvent e) {
         if (!isCounterActive(victim)) return false;
 
-        double dmg = e.getFinalDamage();
+        double dmg = e.getDamage(); // Reflect raw damage, not final
         e.setCancelled(true); // victim takes no damage
 
         attacker.damage(dmg, victim);
@@ -370,9 +362,11 @@ public class BlitzManager {
         }
 
         if (p.isSneaking()) {
-            castCounter(p);
+            // Shift + F -> Shock (Charge Stun)
+            startShockCharge(p);
         } else {
-            castShock(p);
+            // F -> Counter
+            castCounter(p);
         }
     }
 
@@ -476,7 +470,7 @@ public class BlitzManager {
         return feet.getBlock().isPassable() && head.getBlock().isPassable();
     }
 
-    public void castShock(Player p) {
+    public void startShockCharge(Player p) {
         if (!BlitzAccessBridge.hasUsePerm(p) || !BlitzAccessBridge.hasBlitzRune(p)) return;
 
         if (onCd(p, "shock")) {
@@ -485,39 +479,85 @@ public class BlitzManager {
             return;
         }
 
-        if (!requireHunger(p, 2)) { // moderate cost
-            return;
-        }
+        if (shockCharging.contains(p.getUniqueId())) return;
 
-        World w = p.getWorld();
-        Location eye = p.getEyeLocation();
-        Vector dir = eye.getDirection().normalize();
+        shockCharging.add(p.getUniqueId());
+        shockChargeStart.put(p.getUniqueId(), System.currentTimeMillis());
+        msg(p, "§bCharging Shock...");
+        p.getWorld().playSound(p.getLocation(), Sound.BLOCK_BEACON_AMBIENT, 1.0f, 2.0f);
 
-        RayTraceResult result = w.rayTraceEntities(
-                eye, dir, 20, 1.4,
-                e -> e instanceof LivingEntity && e != p);
+        new BukkitRunnable() {
+            @Override
+            public void run() {
+                if (!p.isOnline() || !shockCharging.contains(p.getUniqueId())) {
+                    cancel();
+                    return;
+                }
 
-        if (result == null || result.getHitEntity() == null) {
-            msg(p, "No target for Shock.");
-            return;
-        }
+                long elapsed = System.currentTimeMillis() - shockChargeStart.get(p.getUniqueId());
+                if (elapsed >= SHOCK_CHARGE_MS) {
+                    shockCharging.remove(p.getUniqueId());
+                    shockChargeStart.remove(p.getUniqueId());
+                    fireShockProjectile(p);
+                    cancel();
+                    return;
+                }
 
-        Location hitLoc = result.getHitEntity().getLocation();
-        int stage = evo.stage(p);
-        long durationMs = (long) (1000L * (1 + stage) * evo.scalar(p, "shock_duration", 1.0));
-        double radius = 3.0;
-
-        for (Entity e : w.getNearbyEntities(hitLoc, radius, radius, radius)) {
-            if (e instanceof LivingEntity && e != p) {
-                applyStunEntity((LivingEntity) e, durationMs);
+                // Charge particles
+                Location loc = p.getLocation().add(0, 1, 0);
+                double progress = (double) elapsed / SHOCK_CHARGE_MS;
+                p.getWorld().spawnParticle(Particle.ELECTRIC_SPARK, loc, 5, 0.5 * progress, 0.5 * progress, 0.5 * progress, 0.05);
             }
-        }
+        }.runTaskTimer(plugin, 0L, 2L);
+    }
 
-        w.spawnParticle(Particle.ELECTRIC_SPARK, hitLoc, 60, 0.8, 1.0, 0.8, 0.12);
-        w.playSound(hitLoc, Sound.BLOCK_AMETHYST_BLOCK_HIT, 1.0f, 1.4f);
+    public void fireShockProjectile(Player p) {
+        if (!requireHunger(p, 2)) return;
 
-        setCd(p, "shock");
-        msg(p, "Shock cast.");
+        Location start = p.getEyeLocation();
+        Vector dir = start.getDirection().normalize().multiply(1.5); // Speed
+
+        new BukkitRunnable() {
+            Location current = start.clone();
+            int ticks = 0;
+
+            @Override
+            public void run() {
+                if (ticks++ > 40) { // Max range/time
+                    cancel();
+                    return;
+                }
+
+                current.add(dir);
+                current.getWorld().spawnParticle(Particle.ELECTRIC_SPARK, current, 5, 0.1, 0.1, 0.1, 0.02);
+
+                // Hit detection
+                for (Entity e : current.getWorld().getNearbyEntities(current, 0.8, 0.8, 0.8)) {
+                    if (e instanceof LivingEntity && e != p) {
+                        LivingEntity target = (LivingEntity) e;
+                        int stage = evo.stage(p);
+                        long durationMs = (long) (1000L * (1 + stage) * evo.scalar(p, "shock_duration", 1.0));
+                        
+                        applyStunEntity(target, durationMs);
+                        current.getWorld().playSound(current, Sound.BLOCK_AMETHYST_BLOCK_HIT, 1.0f, 1.4f);
+                        current.getWorld().spawnParticle(Particle.FLASH, current, 1);
+                        
+                        msg(p, "§bStunned " + target.getName() + "!");
+                        setCd(p, "shock");
+                        cancel();
+                        return;
+                    }
+                }
+
+                if (current.getBlock().getType().isSolid()) {
+                    current.getWorld().spawnParticle(Particle.SMOKE, current, 5, 0.1, 0.1, 0.1, 0.01);
+                    cancel();
+                }
+            }
+        }.runTaskTimer(plugin, 0L, 1L);
+
+        p.getWorld().playSound(start, Sound.ENTITY_LIGHTNING_BOLT_THUNDER, 0.5f, 2.0f);
+        msg(p, "§bShock fired!");
     }
 
     public void castCounter(Player p) {
