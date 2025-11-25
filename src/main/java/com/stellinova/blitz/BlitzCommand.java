@@ -142,7 +142,7 @@ public class BlitzCommand implements CommandExecutor {
                 manager.castFlash(p);
                 break;
             case "shock":
-                manager.castShock(p);
+                manager.startShockCharge(p);
                 break;
             case "counter":
             case "counterattack":
