@@ -69,6 +69,18 @@ public class BlitzManager {
 
     public void warm(Player p) {
         data(p).reset();
+        UUID id = p.getUniqueId();
+        lastSneak.remove(id);
+        lastSwap.remove(id);
+        sneakingPlayers.remove(id);
+        pendingBolt.remove(id);
+        shockCharging.remove(id);
+        shockChargeStart.remove(id);
+        if (previewTask != null && !previewTask.isCancelled()) {
+            // If we were previewing for this player, it might be tricky to stop just for them without a map, 
+            // but usually preview is global or per-player task. 
+            // The current code has a single 'previewTask' loop, so we don't cancel it.
+        }
     }
 
     public void handleQuit(Player p) {
