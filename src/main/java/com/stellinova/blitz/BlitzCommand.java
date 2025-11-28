@@ -112,7 +112,6 @@ public class BlitzCommand implements CommandExecutor {
             
             BlitzAccessBridge.revoke(p);
             manager.warm(p);
-            hud.refresh(p);
             p.sendMessage("§6Lightning fades. Blitz rune disabled.");
             return true;
         }
@@ -125,7 +124,6 @@ public class BlitzCommand implements CommandExecutor {
             }
             
             BlitzAccessBridge.grant(p);
-            hud.refresh(p);
             p.sendMessage("§bSparks fly! Blitz rune enabled.");
             return true;
         }
