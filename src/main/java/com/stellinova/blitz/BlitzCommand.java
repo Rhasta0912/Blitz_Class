@@ -121,7 +121,7 @@ public class BlitzCommand implements CommandExecutor {
                     return true;
                 }
                 manager.warm(target);
-                hud.refresh(target);
+                hud.hide(target);
                 sender.sendMessage("§aBlitz state reset for " + target.getName() + ".");
                 return true;
             }
@@ -129,7 +129,7 @@ public class BlitzCommand implements CommandExecutor {
             // self reset
             Player p = self;
             manager.warm(p);
-            hud.refresh(p);
+            hud.hide(p);
             p.sendMessage("§aYour Blitz rune state has been reset.");
             return true;
         }
