@@ -581,9 +581,10 @@ public class BlitzManager {
             return;
         }
 
+        // Counter can break out of stun!
         if (isStunned(p)) {
-            msg(p, "You are stunned.");
-            return;
+            data(p).setStunnedUntil(0L); // Clear stun
+            msg(p, "§eYou break free from the stun!");
         }
 
         // VERY hunger costly for counter
