@@ -3,6 +3,7 @@ package com.stellinova.blitz.hud;
 import com.stellinova.blitz.bridge.BlitzAccessBridge;
 import com.stellinova.blitz.bridge.BlitzEvoBridge;
 import com.stellinova.blitz.manager.BlitzManager;
+import com.stellinova.blitz.player.PlayerData;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
@@ -75,7 +76,7 @@ public class ScoreboardHud {
         ScoreboardManager sm = Bukkit.getScoreboardManager();
         if (sm == null) return;
 
-        // Hide HUD if they can't use Blitz
+        // Hide HUD if they can't use Blitz OR if HUD is disabled
         if (!BlitzAccessBridge.hasUsePerm(p) || !BlitzAccessBridge.hasBlitzRune(p)) {
             Scoreboard current = p.getScoreboard();
             Objective existing = current.getObjective("blitzhud");
@@ -83,6 +84,13 @@ public class ScoreboardHud {
                 Scoreboard empty = sm.getNewScoreboard();
                 p.setScoreboard(empty);
             }
+            return;
+        }
+
+        // Check if HUD is disabled for this player
+        PlayerData pd = manager.data(p);
+        if (pd != null && !pd.isHudEnabled()) {
+            hide(p);
             return;
         }
 
