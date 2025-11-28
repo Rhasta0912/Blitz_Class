@@ -53,20 +53,18 @@ public final class BlitzAccessBridge {
     }
 
     public static void grant(Player p) {
-        // Give Blitz rune via RuneSelector if available
+        // Set rune to NONE in RuneSelector (disable it there)
         tryInitRuneSelector();
-        if (runeService != null && blitzRuneConstant != null) {
+        if (runeService != null && runeTypeClass != null) {
             try {
                 Method setMethod = runeService.getClass().getMethod("setActiveRune", Player.class, runeTypeClass);
                 setMethod.invoke(runeService, p, blitzRuneConstant);
-            } catch (Throwable t) {
-                log("Failed to grant Blitz rune: " + t.getMessage());
-            }
+            } catch (Throwable ignored) {}
         }
     }
 
     public static void revoke(Player p) {
-        // Remove Blitz rune via RuneSelector if available
+        // Set rune to NONE in RuneSelector
         tryInitRuneSelector();
         if (runeService != null && runeTypeClass != null) {
             try {
@@ -84,9 +82,7 @@ public final class BlitzAccessBridge {
                     Method setMethod = runeService.getClass().getMethod("setActiveRune", Player.class, runeTypeClass);
                     setMethod.invoke(runeService, p, noneRune);
                 }
-            } catch (Throwable t) {
-                log("Failed to revoke Blitz rune: " + t.getMessage());
-            }
+            } catch (Throwable ignored) {}
         }
     }
 
@@ -95,39 +91,41 @@ public final class BlitzAccessBridge {
         runeChecked = true;
 
         try {
-            ClassLoader cl = Bukkit.getServer().getClass().getClassLoader();
-            Class<?> helperClass = Class.forName("com.stellinova.runeselector.api.RuneServiceHelper", false, cl);
-            Method getMethod = helperClass.getMethod("get");
-            Object svc = getMethod.invoke(null);
-            if (svc == null) {
-                log("RuneSelector service helper returned null.");
-                return;
-            }
-            runeService = svc;
-            Class<?> serviceClass = svc.getClass();
-            getActiveRuneMethod = serviceClass.getMethod("getActiveRune", Player.class);
-
-            runeTypeClass = Class.forName("com.stellinova.runeselector.api.RuneType", false, cl);
-            Object[] constants = runeTypeClass.getEnumConstants();
-            if (constants != null) {
-                for (Object c : constants) {
-                    if (c.toString().equalsIgnoreCase("BLITZ")) {
-                        blitzRuneConstant = c;
-                        break;
+            // Try via Services Manager first
+            org.bukkit.plugin.RegisteredServiceProvider<?> rsp = 
+                Bukkit.getServicesManager().getRegistration(
+                    Class.forName("com.stellinova.runeselector.api.IRuneService"));
+            
+            if (rsp != null) {
+                runeService = rsp.getProvider();
+                Class<?> serviceClass = runeService.getClass();
+                getActiveRuneMethod = serviceClass.getMethod("getActiveRune", Player.class);
+                
+                runeTypeClass = Class.forName("com.stellinova.runeselector.api.RuneType");
+                Object[] constants = runeTypeClass.getEnumConstants();
+                if (constants != null) {
+                    for (Object c : constants) {
+                        if (c.toString().equalsIgnoreCase("BLITZ")) {
+                            blitzRuneConstant = c;
+                            break;
+                        }
                     }
                 }
-            }
-
-            if (blitzRuneConstant == null) {
-                log("RuneType.BLITZ not found in RuneSelector API.");
+                
+                if (blitzRuneConstant != null) {
+                    log("RuneSelector integration successful!");
+                    return;
+                }
             }
         } catch (Throwable t) {
-            log("RuneSelector reflection init failed: " + t.getMessage());
-            runeService = null;
-            getActiveRuneMethod = null;
-            runeTypeClass = null;
-            blitzRuneConstant = null;
+            log("RuneSelector integration failed: " + t.getMessage());
         }
+        
+        // Failed to init
+        runeService = null;
+        getActiveRuneMethod = null;
+        runeTypeClass = null;
+        blitzRuneConstant = null;
     }
 
     private static void log(String msg) {
