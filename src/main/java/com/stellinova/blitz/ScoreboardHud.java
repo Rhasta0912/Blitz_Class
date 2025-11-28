@@ -45,6 +45,18 @@ public class ScoreboardHud {
         } catch (Throwable ignored) {}
     }
 
+    public void hide(Player p) {
+        ScoreboardManager sm = Bukkit.getScoreboardManager();
+        if (sm == null) return;
+        
+        Scoreboard current = p.getScoreboard();
+        Objective existing = current.getObjective("blitzhud");
+        if (existing != null && existing.getDisplaySlot() == DisplaySlot.SIDEBAR) {
+            Scoreboard empty = sm.getNewScoreboard();
+            p.setScoreboard(empty);
+        }
+    }
+
     private void startLoop() {
         shutdown();
         loop = new BukkitRunnable() {
