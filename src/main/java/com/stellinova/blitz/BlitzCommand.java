@@ -103,20 +103,31 @@ public class BlitzCommand implements CommandExecutor {
             return true;
         }
 
-        // RESET – remove the Blitz rune or clean up state
+        // RESET – clean up Blitz state (called by RuneSelector when switching away)
         if (sub.equals("reset")) {
-            if (!(sender instanceof Player self)) {
-                sender.sendMessage("Players only for /blitz reset");
+            if (!(sender instanceof Player p)) {
+                sender.sendMessage("Players only");
                 return true;
             }
+            
+            // Clean up state silently (RuneSelector calling us)
+            manager.warm(p);
+            hud.hide(p);
+            return true;
+        }
 
-            Player p = self;
+        // RUNE – activate or remove Blitz rune
+        if (sub.equals("rune")) {
+            if (!(sender instanceof Player p)) {
+                sender.sendMessage("Players only");
+                return true;
+            }
             
-            // Check if player currently has Blitz rune
-            boolean hasBlitzRune = BlitzAccessBridge.hasBlitzRune(p);
+            // Check if they already have the rune (activating) or want to remove it
+            boolean hasBlitz = BlitzAccessBridge.hasBlitzRune(p);
             
-            if (hasBlitzRune) {
-                // Player has Blitz rune - remove it via RuneSelector
+            if (hasBlitz) {
+                // Already have it - user wants to remove it
                 try {
                     Class<?> runeServiceClass = Class.forName("com.stellinova.runeselector.api.IRuneService");
                     org.bukkit.plugin.RegisteredServiceProvider<?> rsp = 
@@ -131,34 +142,17 @@ public class BlitzCommand implements CommandExecutor {
                             .getMethod("setActiveRune", org.bukkit.entity.Player.class, runeTypeClass)
                             .invoke(runeService, p, noneRune);
                             
-                        // RuneSelector will call /blitz reset again after removing, so we're done
-                        return true;
+                        p.sendMessage("§aBlitz rune removed! Use /rune to select another class.");
                     } else {
-                        p.sendMessage("§cRuneSelector not found. Can't remove rune.");
-                        return true;
+                        p.sendMessage("§cRuneSelector not found.");
                     }
                 } catch (Exception e) {
-                    p.sendMessage("§cError removing rune: " + e.getMessage());
-                    e.printStackTrace();
-                    return true;
+                    p.sendMessage("§cFailed to remove rune: " + e.getMessage());
                 }
             } else {
-                // Player doesn't have Blitz rune - this is cleanup call from RuneSelector
-                manager.warm(p);
-                hud.hide(p);
-                p.sendMessage("§aBlitz rune removed!");
-                return true;
+                // Don't have it - RuneSelector is activating it
+                p.sendMessage("§bBlitz rune activated! Use Sneak for abilities.");
             }
-        }
-
-        // RUNE – called by RuneSelector when activating Blitz
-        if (sub.equals("rune")) {
-            if (!(sender instanceof Player p)) {
-                sender.sendMessage("Players only.");
-                return true;
-            }
-            // Activation message
-            p.sendMessage("§bBlitz rune activated! Use Sneak to trigger abilities.");
             return true;
         }
 
