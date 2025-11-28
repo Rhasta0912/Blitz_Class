@@ -103,56 +103,35 @@ public class BlitzCommand implements CommandExecutor {
             return true;
         }
 
-        // RESET – clean up Blitz state (called by RuneSelector when switching away)
+        // RESET – remove Blitz rune (independent command)
         if (sub.equals("reset")) {
             if (!(sender instanceof Player p)) {
                 sender.sendMessage("Players only");
                 return true;
             }
             
-            // Clean up state silently (RuneSelector calling us)
+            // Remove rune from player's PersistentDataContainer
+            try {
+                org.bukkit.NamespacedKey runeKey = new org.bukkit.NamespacedKey("runeselector", "active_rune");
+                p.getPersistentDataContainer().remove(runeKey);
+            } catch (Exception ignored) {}
+            
+            // Clean up Blitz state
             manager.warm(p);
             hud.hide(p);
+            
+            p.sendMessage("§aBlitz rune removed! Use /rune to select another class.");
             return true;
         }
 
-        // RUNE – activate or remove Blitz rune
+        // RUNE – called by RuneSelector when activating Blitz
         if (sub.equals("rune")) {
             if (!(sender instanceof Player p)) {
                 sender.sendMessage("Players only");
                 return true;
             }
             
-            // Check if they already have the rune (activating) or want to remove it
-            boolean hasBlitz = BlitzAccessBridge.hasBlitzRune(p);
-            
-            if (hasBlitz) {
-                // Already have it - user wants to remove it
-                try {
-                    Class<?> runeServiceClass = Class.forName("com.stellinova.runeselector.api.IRuneService");
-                    org.bukkit.plugin.RegisteredServiceProvider<?> rsp = 
-                        Bukkit.getServicesManager().getRegistration(runeServiceClass);
-                        
-                    if (rsp != null) {
-                        Object runeService = rsp.getProvider();
-                        Class<?> runeTypeClass = Class.forName("com.stellinova.runeselector.api.RuneType");
-                        Object noneRune = runeTypeClass.getField("NONE").get(null);
-                        
-                        runeService.getClass()
-                            .getMethod("setActiveRune", org.bukkit.entity.Player.class, runeTypeClass)
-                            .invoke(runeService, p, noneRune);
-                            
-                        p.sendMessage("§aBlitz rune removed! Use /rune to select another class.");
-                    } else {
-                        p.sendMessage("§cRuneSelector not found.");
-                    }
-                } catch (Exception e) {
-                    p.sendMessage("§cFailed to remove rune: " + e.getMessage());
-                }
-            } else {
-                // Don't have it - RuneSelector is activating it
-                p.sendMessage("§bBlitz rune activated! Use Sneak for abilities.");
-            }
+            p.sendMessage("§bBlitz rune activated! Use Sneak for abilities.");
             return true;
         }
 
