@@ -76,7 +76,7 @@ public class ScoreboardHud {
         ScoreboardManager sm = Bukkit.getScoreboardManager();
         if (sm == null) return;
 
-        // Hide HUD if they can't use Blitz OR if HUD is disabled
+        // Hide HUD if they can't use Blitz
         if (!BlitzAccessBridge.hasUsePerm(p) || !BlitzAccessBridge.hasBlitzRune(p)) {
             Scoreboard current = p.getScoreboard();
             Objective existing = current.getObjective("blitzhud");
@@ -84,13 +84,6 @@ public class ScoreboardHud {
                 Scoreboard empty = sm.getNewScoreboard();
                 p.setScoreboard(empty);
             }
-            return;
-        }
-
-        // Check if HUD is disabled for this player
-        PlayerData pd = manager.data(p);
-        if (pd != null && !pd.isHudEnabled()) {
-            hide(p);
             return;
         }
 
