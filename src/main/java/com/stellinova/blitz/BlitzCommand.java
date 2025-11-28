@@ -103,35 +103,30 @@ public class BlitzCommand implements CommandExecutor {
             return true;
         }
 
-        // RESET – remove Blitz rune (independent command)
+        // RESET – disable Blitz rune
         if (sub.equals("reset")) {
             if (!(sender instanceof Player p)) {
                 sender.sendMessage("Players only");
                 return true;
             }
             
-            // Remove rune from player's PersistentDataContainer
-            try {
-                org.bukkit.NamespacedKey runeKey = new org.bukkit.NamespacedKey("runeselector", "active_rune");
-                p.getPersistentDataContainer().remove(runeKey);
-            } catch (Exception ignored) {}
-            
-            // Clean up Blitz state
+            BlitzAccessBridge.revoke(p);
             manager.warm(p);
-            hud.hide(p);
-            
-            p.sendMessage("§aBlitz rune removed! Use /rune to select another class.");
+            hud.refresh(p);
+            p.sendMessage("§6Lightning fades. Blitz rune disabled.");
             return true;
         }
 
-        // RUNE – called by RuneSelector when activating Blitz
+        // RUNE – enable Blitz rune
         if (sub.equals("rune")) {
             if (!(sender instanceof Player p)) {
                 sender.sendMessage("Players only");
                 return true;
             }
             
-            p.sendMessage("§bBlitz rune activated! Use Sneak for abilities.");
+            BlitzAccessBridge.grant(p);
+            hud.refresh(p);
+            p.sendMessage("§bSparks fly! Blitz rune enabled.");
             return true;
         }
 
