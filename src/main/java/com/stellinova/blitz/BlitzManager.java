@@ -104,10 +104,6 @@ public class BlitzManager {
         } catch (Throwable ignored) {}
     }
 
-    private void ensureHudEnabled(Player p) {
-        data(p).setHudEnabled(true);
-    }
-
     // ===========================
     //  ADMIN MODE
     // ===========================
@@ -392,7 +388,6 @@ public class BlitzManager {
 
     public void castBolt(Player p) {
         if (!BlitzAccessBridge.hasUsePerm(p) || !BlitzAccessBridge.hasBlitzRune(p)) return;
-        ensureHudEnabled(p);
 
         if (onCd(p, "bolt")) {
             long sec = cdRemaining(p, "bolt") / 1000L;
@@ -442,7 +437,6 @@ public class BlitzManager {
 
     public void castFlash(Player p) {
         if (!BlitzAccessBridge.hasUsePerm(p) || !BlitzAccessBridge.hasBlitzRune(p)) return;
-        ensureHudEnabled(p);
 
         if (onCd(p, "flash")) {
             long sec = cdRemaining(p, "flash") / 1000L;
@@ -490,7 +484,6 @@ public class BlitzManager {
 
     public void startShockCharge(Player p) {
         if (!BlitzAccessBridge.hasUsePerm(p) || !BlitzAccessBridge.hasBlitzRune(p)) return;
-        ensureHudEnabled(p);
 
         if (onCd(p, "shock")) {
             long sec = cdRemaining(p, "shock") / 1000L;
@@ -581,7 +574,6 @@ public class BlitzManager {
 
     public void castCounter(Player p) {
         if (!BlitzAccessBridge.hasUsePerm(p) || !BlitzAccessBridge.hasBlitzRune(p)) return;
-        ensureHudEnabled(p);
 
         if (onCd(p, "counter")) {
             long sec = cdRemaining(p, "counter") / 1000L;
@@ -621,7 +613,6 @@ public class BlitzManager {
 
     public void castUlt(Player p) {
         if (!BlitzAccessBridge.hasUsePerm(p) || !BlitzAccessBridge.hasBlitzRune(p)) return;
-        ensureHudEnabled(p);
 
         if (onCd(p, "ult")) {
             long sec = cdRemaining(p, "ult") / 1000L;
