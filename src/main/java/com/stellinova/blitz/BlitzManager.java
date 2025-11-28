@@ -63,7 +63,7 @@ public class BlitzManager {
         startPreviewLoop();
     }
 
-    private PlayerData data(Player p) {
+    public PlayerData data(Player p) {
         return PlayerData.get(p);
     }
 
