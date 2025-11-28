@@ -27,9 +27,6 @@ public class PlayerData {
     private long counterUntil;
     private long blitzRushUntil;
 
-    // HUD display control
-    private boolean hudEnabled = true;
-
     private PlayerData(UUID uuid) {
         this.uuid = uuid;
     }
@@ -45,7 +42,6 @@ public class PlayerData {
     public void reset() {
         boltReadyAt = flashReadyAt = shockReadyAt = counterReadyAt = ultReadyAt = 0L;
         stunnedUntil = counterUntil = blitzRushUntil = 0L;
-        hudEnabled = false; // Hide HUD on reset
     }
 
     public UUID getUuid() {
@@ -75,7 +71,4 @@ public class PlayerData {
 
     public long getBlitzRushUntil() { return blitzRushUntil; }
     public void setBlitzRushUntil(long t) { blitzRushUntil = t; }
-
-    public boolean isHudEnabled() { return hudEnabled; }
-    public void setHudEnabled(boolean enabled) { hudEnabled = enabled; }
 }
