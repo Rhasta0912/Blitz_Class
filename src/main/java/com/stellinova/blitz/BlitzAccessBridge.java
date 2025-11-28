@@ -52,6 +52,44 @@ public final class BlitzAccessBridge {
         }
     }
 
+    public static void grant(Player p) {
+        // Give Blitz rune via RuneSelector if available
+        tryInitRuneSelector();
+        if (runeService != null && blitzRuneConstant != null) {
+            try {
+                Method setMethod = runeService.getClass().getMethod("setActiveRune", Player.class, runeTypeClass);
+                setMethod.invoke(runeService, p, blitzRuneConstant);
+            } catch (Throwable t) {
+                log("Failed to grant Blitz rune: " + t.getMessage());
+            }
+        }
+    }
+
+    public static void revoke(Player p) {
+        // Remove Blitz rune via RuneSelector if available
+        tryInitRuneSelector();
+        if (runeService != null && runeTypeClass != null) {
+            try {
+                Object noneRune = null;
+                Object[] constants = runeTypeClass.getEnumConstants();
+                if (constants != null) {
+                    for (Object c : constants) {
+                        if (c.toString().equalsIgnoreCase("NONE")) {
+                            noneRune = c;
+                            break;
+                        }
+                    }
+                }
+                if (noneRune != null) {
+                    Method setMethod = runeService.getClass().getMethod("setActiveRune", Player.class, runeTypeClass);
+                    setMethod.invoke(runeService, p, noneRune);
+                }
+            } catch (Throwable t) {
+                log("Failed to revoke Blitz rune: " + t.getMessage());
+            }
+        }
+    }
+
     private static void tryInitRuneSelector() {
         if (runeChecked) return;
         runeChecked = true;
